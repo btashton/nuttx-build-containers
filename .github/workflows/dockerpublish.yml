@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
+    env:
+      DOCKER_BUILDKIT: 1
     steps:
       - uses: actions/checkout@v2
 
