@@ -1,14 +1,19 @@
-FROM ubuntu:19.04 AS nuttx-tools
+FROM ubuntu:19.04 AS builder-base
+# NOTE WE ARE NOT REMOVEING APT CACHE.
+# This should only be used for temp build images that artifacts will be copied from
+RUN apt-get update -qq && apt-get install -y -qq \
+  curl
 
-RUN apt-get update && apt-get install -y \
+
+FROM builder-base AS nuttx-tools
+
+RUN apt-get install -y -qq \
   curl \
   flex \
   bison \
   gperf \
   libncurses5-dev \
-  make \
-  && rm -rf /var/lib/apt/lists/*
-
+  make 
 
 RUN mkdir /tools
 WORKDIR /tools
@@ -30,15 +35,41 @@ RUN cd nuttx-tools \
 CMD [ "/bin/bash" ]
 
 
+FROM builder-base AS nuttx-toolchain-base
+
+RUN mkdir /tools
+WORKDIR /tools
+
+
+FROM nuttx-toolchain-base AS nuttx-toolchain-arm
+# Download the latest ARM GCC toolchain prebuilt by ARM
+RUN mkdir gcc-arm-none-eabi && \
+  curl -s -L  "https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2019q4/gcc-arm-none-eabi-9-2019-q4-major-x86_64-linux.tar.bz2?revision=108bd959-44bd-4619-9c19-26187abf5225&la=en&hash=E788CE92E5DFD64B2A8C246BBA91A249CB8E2D2D" \
+  | tar -C gcc-arm-none-eabi --strip-components 1 -xj
+
+
+FROM nuttx-toolchain-base AS nuttx-toolchain-pinguino
+# Download the pinguino compilers. Note this includes both 8bit and 32bit version. Only copy what is needed
+RUN mkdir pinguino-compilers && \
+  curl -s -L "https://github.com/PinguinoIDE/pinguino-compilers/archive/62db5158d7f6d41c6fadb05de81cc31dd81a1958.tar.gz" \
+  | tar -C pinguino-compilers --strip-components=2 --wildcards -xz */linux64
+
+
+FROM nuttx-toolchain-base AS nuttx-toolchain-riscv
+# Download the latest RISCV GCC toolchain prebuilt by SiFive
+RUN mkdir riscv64-unknown-elf-gcc && \
+  curl -s -l "https://static.dev.sifive.com/dev-tools/riscv64-unknown-elf-gcc-8.3.0-2019.08.0-x86_64-linux-ubuntu14.tar.gz" \
+  | tar -C riscv64-unknown-elf-gcc --strip-components 1 -xz
+
+
 FROM ubuntu:19.04
 MAINTAINER Brennan Ashton<bashton@brennanashton.com>
 
 RUN dpkg --add-architecture i386
-RUN apt-get update && apt-get install -y \
+# This is used for the final images so make sure to not store apt cache
+RUN apt-get update -qq && apt-get install -y -qq \
   git \
-  automake \
   build-essential \
-  gperf \
   wget \
   libx11-dev \
   libxext-dev \
@@ -63,26 +94,18 @@ ENV PATH="/tools/genromfs/usr/bin:$PATH"
 COPY --from=nuttx-tools /tools/kconfig-frontends/ kconfig-frontends/
 ENV PATH="/tools/kconfig-frontends/bin:$PATH"
 
-# Download the latest ARM GCC toolchain prebuilt by ARM
-RUN mkdir gcc-arm-none-eabi && \
-  curl -s -L  "https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2019q4/gcc-arm-none-eabi-9-2019-q4-major-x86_64-linux.tar.bz2?revision=108bd959-44bd-4619-9c19-26187abf5225&la=en&hash=E788CE92E5DFD64B2A8C246BBA91A249CB8E2D2D" \
-  | tar -C gcc-arm-none-eabi --strip-components 1 -xj
+# ARM toolchain
+COPY --from=nuttx-toolchain-arm /tools/gcc-arm-none-eabi/ gcc-arm-none-eabi/
 ENV PATH="/tools/gcc-arm-none-eabi/bin:$PATH"
 
-# Download the pinguino compilers. Note we remove the 8-bit tools.
-# If the 8 bit tools are needed just remove the last line
-RUN mkdir pinguino-compilers && \
-  curl -s -L "https://github.com/PinguinoIDE/pinguino-compilers/archive/62db5158d7f6d41c6fadb05de81cc31dd81a1958.tar.gz" \
-  | tar -C pinguino-compilers --strip-components=2 --wildcards -xz */linux64 && \
-  rm -rf pinguino-compilers/p8
+COPY --from=nuttx-toolchain-pinguino /tools/pinguino-compilers/p32/ pinguino-compilers/p32/
 ENV PATH="/tools/pinguino-compilers/p32/bin:$PATH"
+#COPY --from=nuttx-toolchain-pinguino /tools/pinguino-compilers/p8/ pinguino-compilers/p8/
 #ENV PATH="/tools/pinguino-compilers/p8/bin:$PATH"
 
-# Download the latest RISCV GCC toolchain prebuilt by SiFive
-RUN mkdir riscv64-unknown-elf-gcc && \
-  curl -s -l "https://static.dev.sifive.com/dev-tools/riscv64-unknown-elf-gcc-8.3.0-2019.08.0-x86_64-linux-ubuntu14.tar.gz" \
-  | tar -C riscv64-unknown-elf-gcc --strip-components 1 -xz
-ENV PATH="/prebuilt/riscv64-unknown-elf-gcc/bin:$PATH"
+# ARM toolchain
+COPY --from=nuttx-toolchain-riscv /tools/riscv64-unknown-elf-gcc/ riscv64-unknown-elf-gcc/
+ENV PATH="/tools/riscv64-unknown-elf-gcc/bin:$PATH"
  
 
 CMD [ "/bin/bash" ]
