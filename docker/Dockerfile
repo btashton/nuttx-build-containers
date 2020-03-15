@@ -108,4 +108,4 @@ COPY --from=nuttx-toolchain-riscv /tools/riscv64-unknown-elf-gcc/ riscv64-unknow
 ENV PATH="/tools/riscv64-unknown-elf-gcc/bin:$PATH"
  
 
-CMD [ "/bin/bash" ]
+ENTRYPOINT [ "/bin/bash" ]
